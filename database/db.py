@@ -1,14 +1,14 @@
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 from config import DATABASE_URL
 
 
-_pool: psycopg.AsyncConnectionPool = None
+_pool: AsyncConnectionPool = None
 
 
 async def init_db():
     global _pool
-    from psycopg_pool import AsyncConnectionPool
     _pool = AsyncConnectionPool(DATABASE_URL, open=False)
     await _pool.open()
     await create_tables()
