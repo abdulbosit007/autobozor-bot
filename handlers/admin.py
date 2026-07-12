@@ -88,7 +88,7 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
         f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
         f"💰 <b>${listing['price']:,}</b>\n"
         f"{desc_line}"
-        f"📱 Bog'lanish: tg://user?id={listing['user_id']}"
+        f"📱 <a href=\"tg://user?id={listing['user_id']}\">Sotuvchi bilan bog'lanish</a>"
     )
 
     photos = listing["photo_file_ids"]

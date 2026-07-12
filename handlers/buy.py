@@ -192,7 +192,7 @@ async def _show_results(call: CallbackQuery, state: FSMContext, index: int):
         f"💰 <b>${listing['price']:,}</b>\n"
         f"{desc_line}"
         f"📸 {len(listing['photo_file_ids'])} ta rasm\n\n"
-        f"👤 Sotuvchi: tg://user?id={listing['user_id']}"
+        f"👤 <a href=\"tg://user?id={listing['user_id']}\">Sotuvchi bilan bog'lanish</a>"
     )
 
     nav_kb = listing_nav_kb(index, total, str(listing["listing_id"]), listing["user_id"])
