@@ -1,0 +1,241 @@
+import psycopg
+from psycopg.rows import dict_row
+from config import DATABASE_URL
+
+
+_pool: psycopg.AsyncConnectionPool = None
+
+
+async def init_db():
+    global _pool
+    from psycopg_pool import AsyncConnectionPool
+    _pool = AsyncConnectionPool(DATABASE_URL, open=False)
+    await _pool.open()
+    await create_tables()
+
+
+async def create_tables():
+    async with _pool.connection() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id     BIGINT PRIMARY KEY,
+                username    TEXT,
+                phone       TEXT,
+                is_dealer   BOOLEAN DEFAULT FALSE,
+                created_at  TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS listings (
+                listing_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id         BIGINT REFERENCES users(user_id),
+                brand           TEXT NOT NULL,
+                model           TEXT NOT NULL,
+                year            INT NOT NULL,
+                mileage         INT NOT NULL,
+                price           BIGINT NOT NULL,
+                currency        TEXT NOT NULL DEFAULT 'USD',
+                city            TEXT NOT NULL,
+                description     TEXT,
+                photo_file_ids  TEXT[] NOT NULL,
+                status          TEXT NOT NULL DEFAULT 'pending',
+                is_featured     BOOLEAN DEFAULT FALSE,
+                channel_msg_id  BIGINT,
+                created_at      TIMESTAMP DEFAULT NOW(),
+                expires_at      TIMESTAMP DEFAULT NOW() + INTERVAL '30 days'
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS reports (
+                id          SERIAL PRIMARY KEY,
+                listing_id  UUID REFERENCES listings(listing_id),
+                reporter_id BIGINT,
+                created_at  TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_listings_brand_model ON listings(brand, model)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_listings_user ON listings(user_id)")
+        await conn.commit()
+
+
+# ── Users ──────────────────────────────────────────────────────────────────────
+
+async def upsert_user(user_id: int, username: str):
+    async with _pool.connection() as conn:
+        await conn.execute("""
+            INSERT INTO users (user_id, username)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username
+        """, (user_id, username))
+        await conn.commit()
+
+
+async def get_user(user_id: int):
+    async with _pool.connection() as conn:
+        conn.row_factory = dict_row
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+            return await cur.fetchone()
+
+
+async def count_active_listings(user_id: int) -> int:
+    async with _pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT COUNT(*) FROM listings WHERE user_id=%s AND status IN ('active','pending')",
+                (user_id,)
+            )
+            row = await cur.fetchone()
+            return row[0]
+
+
+# ── Listings ───────────────────────────────────────────────────────────────────
+
+async def create_listing(user_id, brand, model, year, mileage, price, currency,
+                         city, description, photo_file_ids) -> str:
+    async with _pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                INSERT INTO listings
+                    (user_id, brand, model, year, mileage, price, currency, city,
+                     description, photo_file_ids, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
+                RETURNING listing_id::text
+            """, (user_id, brand, model, year, mileage, price, currency,
+                  city, description, photo_file_ids))
+            row = await cur.fetchone()
+            await conn.commit()
+            return row[0]
+
+
+async def get_listing(listing_id: str):
+    async with _pool.connection() as conn:
+        conn.row_factory = dict_row
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM listings WHERE listing_id=%s::uuid", (listing_id,)
+            )
+            return await cur.fetchone()
+
+
+async def get_user_listings(user_id: int):
+    async with _pool.connection() as conn:
+        conn.row_factory = dict_row
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT * FROM listings
+                WHERE user_id=%s AND status != 'deleted'
+                ORDER BY created_at DESC
+            """, (user_id,))
+            return await cur.fetchall()
+
+
+async def set_listing_status(listing_id: str, status: str):
+    async with _pool.connection() as conn:
+        await conn.execute(
+            "UPDATE listings SET status=%s WHERE listing_id=%s::uuid",
+            (status, listing_id)
+        )
+        await conn.commit()
+
+
+async def set_channel_msg(listing_id: str, msg_id: int):
+    async with _pool.connection() as conn:
+        await conn.execute(
+            "UPDATE listings SET channel_msg_id=%s WHERE listing_id=%s::uuid",
+            (msg_id, listing_id)
+        )
+        await conn.commit()
+
+
+async def search_listings(brand: str, model: str,
+                          min_price=None, max_price=None,
+                          min_year=None, max_year=None,
+                          city=None) -> list:
+    conditions = ["status='active'", "brand=%s", "model=%s"]
+    params = [brand, model]
+    if min_price is not None:
+        conditions.append("price >= %s"); params.append(min_price)
+    if max_price is not None:
+        conditions.append("price <= %s"); params.append(max_price)
+    if min_year is not None:
+        conditions.append("year >= %s"); params.append(min_year)
+    if max_year is not None:
+        conditions.append("year <= %s"); params.append(max_year)
+    if city:
+        conditions.append("city=%s"); params.append(city)
+
+    query = f"""
+        SELECT * FROM listings
+        WHERE {' AND '.join(conditions)}
+        ORDER BY is_featured DESC, created_at DESC
+    """
+    async with _pool.connection() as conn:
+        conn.row_factory = dict_row
+        async with conn.cursor() as cur:
+            await cur.execute(query, params)
+            return await cur.fetchall()
+
+
+async def get_pending_listings():
+    async with _pool.connection() as conn:
+        conn.row_factory = dict_row
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM listings WHERE status='pending' ORDER BY created_at ASC"
+            )
+            return await cur.fetchall()
+
+
+async def get_stats():
+    async with _pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT COUNT(*) FROM listings WHERE status='active'")
+            active = (await cur.fetchone())[0]
+            await cur.execute("SELECT COUNT(*) FROM users")
+            users = (await cur.fetchone())[0]
+            await cur.execute("SELECT COUNT(*) FROM listings WHERE status='sold'")
+            sold = (await cur.fetchone())[0]
+            await cur.execute("SELECT COUNT(*) FROM listings WHERE status='pending'")
+            pending = (await cur.fetchone())[0]
+            return {"active": active, "users": users, "sold": sold, "pending": pending}
+
+
+async def expire_old_listings() -> list:
+    async with _pool.connection() as conn:
+        conn.row_factory = dict_row
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                UPDATE listings SET status='expired'
+                WHERE status='active' AND expires_at < NOW()
+                RETURNING user_id, listing_id::text, brand, model
+            """)
+            rows = await cur.fetchall()
+            await conn.commit()
+            return rows
+
+
+async def extend_listing(listing_id: str):
+    async with _pool.connection() as conn:
+        await conn.execute("""
+            UPDATE listings
+            SET status='active', expires_at=NOW() + INTERVAL '30 days'
+            WHERE listing_id=%s::uuid
+        """, (listing_id,))
+        await conn.commit()
+
+
+async def add_report(listing_id: str, reporter_id: int) -> int:
+    async with _pool.connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO reports (listing_id, reporter_id) VALUES (%s::uuid, %s)",
+                (listing_id, reporter_id)
+            )
+            await cur.execute(
+                "SELECT COUNT(*) FROM reports WHERE listing_id=%s::uuid", (listing_id,)
+            )
+            count = (await cur.fetchone())[0]
+            await conn.commit()
+            return count
