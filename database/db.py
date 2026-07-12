@@ -9,7 +9,7 @@ _pool: AsyncConnectionPool = None
 
 async def init_db():
     global _pool
-    _pool = AsyncConnectionPool(DATABASE_URL, open=False)
+    _pool = AsyncConnectionPool(DATABASE_URL, open=False, kwargs={"row_factory": dict_row})
     await _pool.open()
     await create_tables()
 
@@ -73,7 +73,6 @@ async def upsert_user(user_id: int, username: str):
 
 async def get_user(user_id: int):
     async with _pool.connection() as conn:
-        conn.row_factory = dict_row
         async with conn.cursor() as cur:
             await cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
             return await cur.fetchone()
@@ -83,11 +82,11 @@ async def count_active_listings(user_id: int) -> int:
     async with _pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT COUNT(*) FROM listings WHERE user_id=%s AND status IN ('active','pending')",
+                "SELECT COUNT(*) AS cnt FROM listings WHERE user_id=%s AND status IN ('active','pending')",
                 (user_id,)
             )
             row = await cur.fetchone()
-            return row[0]
+            return row["cnt"]
 
 
 # ── Listings ───────────────────────────────────────────────────────────────────
@@ -106,12 +105,11 @@ async def create_listing(user_id, brand, model, year, mileage, price, currency,
                   city, description, photo_file_ids))
             row = await cur.fetchone()
             await conn.commit()
-            return row[0]
+            return row["listing_id"]
 
 
 async def get_listing(listing_id: str):
     async with _pool.connection() as conn:
-        conn.row_factory = dict_row
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT * FROM listings WHERE listing_id=%s::uuid", (listing_id,)
@@ -121,7 +119,6 @@ async def get_listing(listing_id: str):
 
 async def get_user_listings(user_id: int):
     async with _pool.connection() as conn:
-        conn.row_factory = dict_row
         async with conn.cursor() as cur:
             await cur.execute("""
                 SELECT * FROM listings
@@ -172,7 +169,6 @@ async def search_listings(brand: str, model: str,
         ORDER BY is_featured DESC, created_at DESC
     """
     async with _pool.connection() as conn:
-        conn.row_factory = dict_row
         async with conn.cursor() as cur:
             await cur.execute(query, params)
             return await cur.fetchall()
@@ -180,7 +176,6 @@ async def search_listings(brand: str, model: str,
 
 async def get_pending_listings():
     async with _pool.connection() as conn:
-        conn.row_factory = dict_row
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT * FROM listings WHERE status='pending' ORDER BY created_at ASC"
@@ -191,20 +186,19 @@ async def get_pending_listings():
 async def get_stats():
     async with _pool.connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT COUNT(*) FROM listings WHERE status='active'")
-            active = (await cur.fetchone())[0]
-            await cur.execute("SELECT COUNT(*) FROM users")
-            users = (await cur.fetchone())[0]
-            await cur.execute("SELECT COUNT(*) FROM listings WHERE status='sold'")
-            sold = (await cur.fetchone())[0]
-            await cur.execute("SELECT COUNT(*) FROM listings WHERE status='pending'")
-            pending = (await cur.fetchone())[0]
+            await cur.execute("SELECT COUNT(*) AS cnt FROM listings WHERE status='active'")
+            active = (await cur.fetchone())["cnt"]
+            await cur.execute("SELECT COUNT(*) AS cnt FROM users")
+            users = (await cur.fetchone())["cnt"]
+            await cur.execute("SELECT COUNT(*) AS cnt FROM listings WHERE status='sold'")
+            sold = (await cur.fetchone())["cnt"]
+            await cur.execute("SELECT COUNT(*) AS cnt FROM listings WHERE status='pending'")
+            pending = (await cur.fetchone())["cnt"]
             return {"active": active, "users": users, "sold": sold, "pending": pending}
 
 
 async def expire_old_listings() -> list:
     async with _pool.connection() as conn:
-        conn.row_factory = dict_row
         async with conn.cursor() as cur:
             await cur.execute("""
                 UPDATE listings SET status='expired'
