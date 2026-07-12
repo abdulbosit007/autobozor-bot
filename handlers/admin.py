@@ -83,12 +83,13 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
 
     # Post to channel
     desc_line = f"📝 {listing['description']}\n" if listing["description"] else ""
+    phone = listing.get("phone") or ""
     caption = (
         f"🚗 <b>{listing['brand']} {listing['model']}, {listing['year']}</b>\n"
         f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
         f"💰 <b>${listing['price']:,}</b>\n"
+        f"📱 <b>{phone}</b>\n"
         f"{desc_line}"
-        f"📱 <a href=\"tg://user?id={listing['user_id']}\">Sotuvchi bilan bog'lanish</a>"
     )
 
     photos = listing["photo_file_ids"]
@@ -104,14 +105,20 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
     except Exception as e:
         await call.message.answer(f"⚠️ Kanalga joylashda xato: {e}")
 
-    # Notify seller
+    # Notify seller with Sotildi control button
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    sold_kb = InlineKeyboardBuilder()
+    sold_kb.button(text="✅ Sotildi", callback_data=f"mylist:sold:{listing_id}")
+    sold_kb.button(text="🗑 O'chirish", callback_data=f"mylist:delete:{listing_id}")
+    sold_kb.adjust(2)
     try:
         await bot.send_message(
             listing["user_id"],
-            f"✅ <b>E'loningiz tasdiqlandi!</b>\n"
+            f"✅ <b>E'loningiz tasdiqlandi va kanalda joylashtirildi!</b>\n\n"
             f"🚗 {listing['brand']} {listing['model']}, {listing['year']}\n"
             f"💰 ${listing['price']:,}\n\n"
-            f"E'lon kanalda faollashtirildi.",
+            f"Mashina sotilganda pastdagi tugmani bosing 👇",
+            reply_markup=sold_kb.as_markup(),
             parse_mode="HTML"
         )
     except Exception:

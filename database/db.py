@@ -37,6 +37,7 @@ async def create_tables():
                 currency        TEXT NOT NULL DEFAULT 'USD',
                 city            TEXT NOT NULL,
                 description     TEXT,
+                phone           TEXT,
                 photo_file_ids  TEXT[] NOT NULL,
                 status          TEXT NOT NULL DEFAULT 'pending',
                 is_featured     BOOLEAN DEFAULT FALSE,
@@ -44,6 +45,10 @@ async def create_tables():
                 created_at      TIMESTAMP DEFAULT NOW(),
                 expires_at      TIMESTAMP DEFAULT NOW() + INTERVAL '30 days'
             )
+        """)
+        # add phone column if upgrading existing DB
+        await conn.execute("""
+            ALTER TABLE listings ADD COLUMN IF NOT EXISTS phone TEXT
         """)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS reports (
@@ -60,6 +65,14 @@ async def create_tables():
 
 
 # ── Users ──────────────────────────────────────────────────────────────────────
+
+async def save_user_phone(user_id: int, phone: str):
+    async with _pool.connection() as conn:
+        await conn.execute(
+            "UPDATE users SET phone=%s WHERE user_id=%s", (phone, user_id)
+        )
+        await conn.commit()
+
 
 async def upsert_user(user_id: int, username: str):
     async with _pool.connection() as conn:
@@ -92,17 +105,17 @@ async def count_active_listings(user_id: int) -> int:
 # ── Listings ───────────────────────────────────────────────────────────────────
 
 async def create_listing(user_id, brand, model, year, mileage, price, currency,
-                         city, description, photo_file_ids) -> str:
+                         city, description, photo_file_ids, phone="") -> str:
     async with _pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
                 INSERT INTO listings
                     (user_id, brand, model, year, mileage, price, currency, city,
-                     description, photo_file_ids, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
+                     description, photo_file_ids, phone, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
                 RETURNING listing_id::text
             """, (user_id, brand, model, year, mileage, price, currency,
-                  city, description, photo_file_ids))
+                  city, description, photo_file_ids, phone))
             row = await cur.fetchone()
             await conn.commit()
             return row["listing_id"]

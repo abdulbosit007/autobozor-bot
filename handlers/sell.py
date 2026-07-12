@@ -1,9 +1,10 @@
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import (Message, CallbackQuery, ReplyKeyboardMarkup,
+                            KeyboardButton, ReplyKeyboardRemove)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import FREE_LISTING_LIMIT, MIN_PHOTOS, MAX_PHOTOS, ADMIN_ID, CHANNEL_ID
+from config import FREE_LISTING_LIMIT, MIN_PHOTOS, MAX_PHOTOS, ADMIN_ID
 from database import db
 from keyboards.kb import (
     brands_kb, models_kb, years_kb, cities_kb,
@@ -20,9 +21,18 @@ class SellStates(StatesGroup):
     mileage     = State()
     price       = State()
     city        = State()
+    phone       = State()
     photos      = State()
     description = State()
     confirm     = State()
+
+
+def phone_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📱 Telefon raqamimni yuborish", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
 
 
 # ── Entry ──────────────────────────────────────────────────────────────────────
@@ -84,10 +94,7 @@ async def sell_model(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("sell:year:"))
 async def sell_year(call: CallbackQuery, state: FSMContext):
     year_str = call.data.split(":", 2)[2]
-    if year_str == "Eskiroq...":
-        await state.update_data(year=2015)
-    else:
-        await state.update_data(year=int(year_str))
+    await state.update_data(year=2015 if year_str == "Eskiroq..." else int(year_str))
     await state.set_state(SellStates.mileage)
     await call.message.edit_text(
         f"✅ Yil: <b>{year_str}</b>\n\n"
@@ -119,7 +126,7 @@ async def sell_mileage(message: Message, state: FSMContext):
 
 @router.message(SellStates.price)
 async def sell_price(message: Message, state: FSMContext):
-    text = message.text.strip().replace(" ", "").replace(",", "").replace("$", "").replace("£", "")
+    text = message.text.strip().replace(" ", "").replace(",", "").replace("$", "")
     if not text.isdigit():
         await message.answer("❌ Iltimos, faqat raqam kiriting. Masalan: <b>12500</b>", parse_mode="HTML")
         return
@@ -137,17 +144,63 @@ async def sell_price(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("sell:city:"))
 async def sell_city(call: CallbackQuery, state: FSMContext):
     city = call.data.split(":", 2)[2]
-    await state.update_data(city=city)
-    await state.update_data(photos=[])
-    await state.set_state(SellStates.photos)
-    await call.message.edit_text(
+    await state.update_data(city=city, photos=[])
+    await state.set_state(SellStates.phone)
+    await call.message.answer(
         f"✅ Shahar: <b>{city}</b>\n\n"
+        "📱 <b>Telefon raqamingizni yuboring</b>\n"
+        "Xaridorlar siz bilan bog'lanishi uchun kerak.",
+        reply_markup=phone_kb(),
+        parse_mode="HTML"
+    )
+
+
+# ── Phone ──────────────────────────────────────────────────────────────────────
+
+@router.message(SellStates.phone, F.contact)
+async def sell_phone_contact(message: Message, state: FSMContext):
+    phone = message.contact.phone_number
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    await state.update_data(phone=phone)
+    await db.save_user_phone(message.from_user.id, phone)
+    await _ask_photos(message, state)
+
+
+@router.message(SellStates.phone, F.text)
+async def sell_phone_text(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    # accept manually typed number too
+    digits = phone.replace("+", "").replace(" ", "").replace("-", "")
+    if not digits.isdigit() or len(digits) < 9:
+        await message.answer(
+            "❌ Noto'g'ri raqam. Tugmani bosing yoki raqamni kiriting.\n"
+            "Masalan: <b>+998901234567</b>",
+            parse_mode="HTML"
+        )
+        return
+    if not phone.startswith("+"):
+        phone = "+" + phone
+    await state.update_data(phone=phone)
+    await db.save_user_phone(message.from_user.id, phone)
+    await _ask_photos(message, state)
+
+
+async def _ask_photos(message: Message, state: FSMContext):
+    await state.set_state(SellStates.photos)
+    await message.answer(
+        f"✅ Telefon qabul qilindi.\n\n"
         f"📸 <b>Avtomobil rasmlarini yuboring</b>\n"
         f"Kamida {MIN_PHOTOS} ta, ko'pi bilan {MAX_PHOTOS} ta.\n\n"
         f"Rasmlarni yuborib bo'lgach <b>Tayyor</b> tugmasini bosing.",
-        reply_markup=photos_done_kb(),
+        reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML"
     )
+    # send the "Tayyor" inline button in a separate message
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Tayyor", callback_data="sell:photos_done")
+    await message.answer("👇", reply_markup=kb.as_markup())
 
 
 # ── Photos ─────────────────────────────────────────────────────────────────────
@@ -159,19 +212,18 @@ async def sell_photo(message: Message, state: FSMContext):
     if len(photos) >= MAX_PHOTOS:
         await message.answer(f"⚠️ Maksimal {MAX_PHOTOS} ta rasm yuborishingiz mumkin.")
         return
-    file_id = message.photo[-1].file_id
-    photos.append(file_id)
+    photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     remaining = MIN_PHOTOS - len(photos)
     if remaining > 0:
-        await message.answer(
-            f"✅ {len(photos)} ta rasm qabul qilindi. Yana kamida {remaining} ta yuboring.",
-            reply_markup=photos_done_kb()
-        )
+        await message.answer(f"✅ {len(photos)} ta rasm. Yana kamida {remaining} ta yuboring.")
     else:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        kb = InlineKeyboardBuilder()
+        kb.button(text="✅ Tayyor", callback_data="sell:photos_done")
         await message.answer(
             f"✅ {len(photos)} ta rasm. Yana yuborishingiz yoki <b>Tayyor</b> bosishingiz mumkin.",
-            reply_markup=photos_done_kb(),
+            reply_markup=kb.as_markup(),
             parse_mode="HTML"
         )
 
@@ -212,16 +264,18 @@ async def sell_description(message: Message, state: FSMContext):
         city=data["city"],
         description=data.get("description"),
         photo_file_ids=data["photos"],
+        phone=data.get("phone", ""),
     )
     await state.update_data(draft_listing_id=listing_id)
     await state.set_state(SellStates.confirm)
 
-    desc_line = f"📝 {desc}" if desc else ""
+    desc_line = f"📝 {desc}\n" if desc else ""
     preview = (
         f"🚗 <b>{data['brand']} {data['model']}, {data['year']}</b>\n"
         f"📍 {data['city']}   🛣 {data['mileage']:,} km\n"
         f"💰 <b>${data['price']:,}</b>\n"
-        f"{desc_line}\n"
+        f"📱 {data.get('phone', '')}\n"
+        f"{desc_line}"
         f"📸 {len(data['photos'])} ta rasm"
     )
     await message.answer(
@@ -246,31 +300,26 @@ async def sell_confirm(call: CallbackQuery, state: FSMContext, bot: Bot):
     if action == "edit":
         await db.set_listing_status(listing_id, "deleted")
         await state.clear()
-        await call.message.edit_text(
-            "🔄 E'lonni qaytadan boshlaylik.",
-            reply_markup=back_to_menu_kb()
-        )
+        await call.message.edit_text("🔄 E'lonni qaytadan boshlaylik.", reply_markup=back_to_menu_kb())
         return
 
     if action == "publish":
         listing = await db.get_listing(listing_id)
-        # Send for admin approval
         desc_line = f"📝 {listing['description']}\n" if listing["description"] else ""
         text = (
             f"🆕 <b>Yangi e'lon (tasdiqlash kerak)</b>\n\n"
             f"🚗 {listing['brand']} {listing['model']}, {listing['year']}\n"
             f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
             f"💰 ${listing['price']:,}\n"
+            f"📱 {listing['phone']}\n"
             f"{desc_line}"
             f"👤 Sotuvchi: @{call.from_user.username or call.from_user.id}\n"
             f"🆔 ID: <code>{listing_id}</code>"
         )
+        from aiogram.types import InputMediaPhoto
         await bot.send_media_group(
             chat_id=ADMIN_ID,
-            media=[
-                __import__("aiogram").types.InputMediaPhoto(media=fid)
-                for fid in listing["photo_file_ids"]
-            ]
+            media=[InputMediaPhoto(media=fid) for fid in listing["photo_file_ids"]]
         )
         await bot.send_message(ADMIN_ID, text, reply_markup=admin_listing_kb(listing_id), parse_mode="HTML")
         await state.clear()
