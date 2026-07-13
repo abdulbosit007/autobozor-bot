@@ -52,6 +52,7 @@ async def create_tables():
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS phone TEXT")
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS was_approved BOOLEAN DEFAULT FALSE")
+        await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS channel_msg_ids BIGINT[] DEFAULT '{}'::BIGINT[]")
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS payment_requests (
@@ -237,10 +238,12 @@ async def set_listing_status(listing_id: str, status: str):
         await conn.commit()
 
 
-async def set_channel_msg(listing_id: str, msg_id: int):
+async def set_channel_msg(listing_id: str, msg_id: int, all_msg_ids: list = None):
     async with _pool.connection() as conn:
+        ids = all_msg_ids or [msg_id]
         await conn.execute(
-            "UPDATE listings SET channel_msg_id=%s WHERE listing_id=%s::uuid", (msg_id, listing_id)
+            "UPDATE listings SET channel_msg_id=%s, channel_msg_ids=%s WHERE listing_id=%s::uuid",
+            (msg_id, ids, listing_id)
         )
         await conn.commit()
 

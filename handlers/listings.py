@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from database import db
 from keyboards.kb import my_listings_item_kb, back_to_menu_kb
 from config import CHANNEL_ID
+from handlers.admin import delete_channel_listing
 
 router = Router()
 
@@ -84,12 +85,8 @@ async def mark_sold(call: CallbackQuery, bot: Bot):
         await call.answer("Ruxsat yo'q.", show_alert=True)
         return
     await db.set_listing_status(listing_id, "sold")
-    # Remove from channel if possible
-    if listing and listing["channel_msg_id"]:
-        try:
-            await bot.delete_message(CHANNEL_ID, listing["channel_msg_id"])
-        except Exception:
-            pass
+    if listing:
+        await delete_channel_listing(bot, listing)
     await call.answer("✅ E'lon 'Sotildi' deb belgilandi.", show_alert=True)
     await call.message.edit_text(
         "✅ E'lon sotildi deb belgilandi va qidiruv natijalaridan olib tashlandi.",
@@ -116,11 +113,8 @@ async def delete_listing(call: CallbackQuery, bot: Bot):
         await call.answer("Ruxsat yo'q.", show_alert=True)
         return
     await db.set_listing_status(listing_id, "deleted")
-    if listing and listing["channel_msg_id"]:
-        try:
-            await bot.delete_message(CHANNEL_ID, listing["channel_msg_id"])
-        except Exception:
-            pass
+    if listing:
+        await delete_channel_listing(bot, listing)
     await call.answer("🗑 E'lon o'chirildi.", show_alert=True)
     await call.message.edit_text("🗑 E'lon o'chirildi.", reply_markup=back_to_menu_kb())
 

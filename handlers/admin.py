@@ -14,6 +14,18 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 
+async def delete_channel_listing(bot: Bot, listing: dict):
+    """Delete all channel messages for a listing (handles media groups)."""
+    ids = listing.get("channel_msg_ids") or []
+    if not ids and listing.get("channel_msg_id"):
+        ids = [listing["channel_msg_id"]]
+    for mid in ids:
+        try:
+            await bot.delete_message(CHANNEL_ID, mid)
+        except Exception:
+            pass
+
+
 # ── Stats ──────────────────────────────────────────────────────────────────────
 
 @router.message(Command("admin"))
@@ -104,12 +116,13 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
     try:
         if len(photos) == 1:
             msg = await bot.send_photo(CHANNEL_ID, photos[0], caption=caption, parse_mode="HTML")
-            await db.set_channel_msg(listing_id, msg.message_id)
+            await db.set_channel_msg(listing_id, msg.message_id, [msg.message_id])
         else:
             media = [InputMediaPhoto(media=pid) for pid in photos]
             media[0] = InputMediaPhoto(media=photos[0], caption=caption, parse_mode="HTML")
             msgs = await bot.send_media_group(CHANNEL_ID, media)
-            await db.set_channel_msg(listing_id, msgs[0].message_id)
+            all_ids = [m.message_id for m in msgs]
+            await db.set_channel_msg(listing_id, all_ids[0], all_ids)
     except Exception as e:
         await call.message.answer(f"⚠️ Kanalga joylashda xato: {e}")
 
@@ -149,12 +162,7 @@ async def reject_listing(call: CallbackQuery, bot: Bot):
 
     await db.set_listing_status(listing_id, "rejected")  # frees the slot
 
-    # Delete from channel if already posted
-    if listing.get("channel_msg_id"):
-        try:
-            await bot.delete_message(CHANNEL_ID, listing["channel_msg_id"])
-        except Exception:
-            pass
+    await delete_channel_listing(bot, listing)
 
     try:
         await bot.send_message(
