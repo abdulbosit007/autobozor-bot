@@ -4,6 +4,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import BOT_TOKEN
@@ -42,6 +43,14 @@ async def main():
 
     await init_db()
     log.info("Database initialized")
+
+    await bot.set_my_commands([
+        BotCommand(command="start",     description="🏠 Bosh sahifa"),
+        BotCommand(command="sell",      description="🔴 Avtomobil sotish"),
+        BotCommand(command="buy",       description="🟢 Avtomobil sotib olish"),
+        BotCommand(command="mylistings",description="📋 Mening e'lonlarim"),
+        BotCommand(command="status",    description="📊 E'lon limitim holati"),
+    ])
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(notify_expired, "cron", hour=10, minute=0, args=[bot])
