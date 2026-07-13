@@ -103,14 +103,14 @@ async def get_user(user_id: int):
 
 
 async def count_active_listings(user_id: int) -> int:
-    """Count listings that use up a free slot.
-    Sold/expired listings are excluded — they legitimately finished.
-    Deleted listings still count to prevent delete-to-bypass abuse.
+    """Count listings currently using a free slot.
+    Only pending (awaiting approval) and active (live) listings count.
+    Rejected, deleted, sold, expired = slot is freed.
     """
     async with _pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT COUNT(*) AS cnt FROM listings WHERE user_id=%s AND status NOT IN ('sold','expired')",
+                "SELECT COUNT(*) AS cnt FROM listings WHERE user_id=%s AND status IN ('active','pending')",
                 (user_id,)
             )
             return (await cur.fetchone())["cnt"]
