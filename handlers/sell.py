@@ -1,17 +1,25 @@
+import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import (Message, CallbackQuery, ReplyKeyboardMarkup,
                             KeyboardButton, ReplyKeyboardRemove)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import FREE_LISTING_LIMIT, MIN_PHOTOS, MAX_PHOTOS, ADMIN_ID
 from database import db
 from keyboards.kb import (
     brands_kb, models_kb, years_kb, cities_kb,
-    photos_done_kb, confirm_listing_kb, back_to_menu_kb, admin_listing_kb
+    confirm_listing_kb, back_to_menu_kb, admin_listing_kb
 )
 
 router = Router()
+
+CURRENT_YEAR = datetime.datetime.now().year
+MIN_YEAR = 1970
+MAX_MILEAGE = 999_999
+MAX_PRICE = 9_999_999
+MIN_PRICE = 100
 
 
 class SellStates(StatesGroup):
@@ -30,9 +38,14 @@ class SellStates(StatesGroup):
 def phone_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📱 Telefon raqamimni yuborish", request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
+        resize_keyboard=True, one_time_keyboard=True
     )
+
+
+def photos_done_inline():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Tayyor", callback_data="sell:photos_done")
+    return kb.as_markup()
 
 
 # ── Entry ──────────────────────────────────────────────────────────────────────
@@ -42,15 +55,29 @@ async def sell_start(call: CallbackQuery, state: FSMContext):
     user_id = call.from_user.id
     count = await db.count_active_listings(user_id)
     user = await db.get_user(user_id)
-    if count >= FREE_LISTING_LIMIT and not user["is_dealer"]:
-        await call.message.edit_text(
-            "⚠️ Siz allaqachon <b>2 ta bepul e'lon</b> joylashtirdingiz.\n"
-            "Ko'proq joylashtirish uchun dealer hisobi kerak.\n\n"
-            "📩 Admin bilan bog'laning: @autobozor_admin",
-            reply_markup=back_to_menu_kb(),
-            parse_mode="HTML"
-        )
-        return
+
+    if count >= FREE_LISTING_LIMIT:
+        paid_slots = user.get("paid_slots", 0) or 0
+        if paid_slots > 0:
+            # Has a paid slot approved — let them post
+            await state.update_data(is_paid=True)
+        else:
+            # No paid slot — show payment request option
+            kb = InlineKeyboardBuilder()
+            kb.button(text="💳 To'lov so'rovi yuborish", callback_data="sell:pay_request")
+            kb.button(text="🏠 Menyu", callback_data="main_menu")
+            kb.adjust(1)
+            await call.message.edit_text(
+                f"⚠️ Sizda allaqachon <b>{count} ta</b> faol e'lon bor.\n\n"
+                f"Bepul limit: <b>{FREE_LISTING_LIMIT} ta</b>\n\n"
+                "Qo'shimcha e'lon joylashtirish uchun <b>har bir e'lon uchun to'lov</b> talab qilinadi.\n"
+                "To'lov so'rovi yuboring — admin to'lovni tasdiqlaydi va siz e'lon joylashtirishingiz mumkin.",
+                reply_markup=kb.as_markup(),
+                parse_mode="HTML"
+            )
+            return
+    else:
+        await state.update_data(is_paid=False)
 
     await state.set_state(SellStates.brand)
     await call.message.edit_text(
@@ -58,6 +85,88 @@ async def sell_start(call: CallbackQuery, state: FSMContext):
         reply_markup=brands_kb("sell"),
         parse_mode="HTML"
     )
+
+
+# ── Payment request ────────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "sell:pay_request")
+async def send_pay_request(call: CallbackQuery):
+    user = await db.get_user(call.from_user.id)
+    user_phone = user.get("phone") or "Noma'lum"
+    username = call.from_user.username or str(call.from_user.id)
+
+    req_id = await db.create_payment_request(call.from_user.id, username, user_phone)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ To'lov tasdiqlandi", callback_data=f"pay:approve:{req_id}")
+    kb.button(text="❌ Rad etish",          callback_data=f"pay:reject:{req_id}")
+    kb.adjust(2)
+
+    await call.bot.send_message(
+        ADMIN_ID,
+        f"💳 <b>Yangi to'lov so'rovi</b>\n\n"
+        f"👤 @{username}\n"
+        f"📱 {user_phone}\n"
+        f"🆔 User ID: <code>{call.from_user.id}</code>\n\n"
+        f"To'lovni qabul qiling va tasdiqlang.",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+    await call.message.edit_text(
+        "✅ <b>So'rovingiz adminga yuborildi.</b>\n\n"
+        "Admin to'lovni tasdiqlashi bilan sizga xabar keladi.\n"
+        "To'lovni amalga oshiring va adminga xabar bering.",
+        reply_markup=back_to_menu_kb(),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("pay:"))
+async def handle_payment(call: CallbackQuery, bot: Bot):
+    _, action, req_id_str = call.data.split(":", 2)
+    req_id = int(req_id_str)
+    req = await db.get_payment_request(req_id)
+    if not req:
+        await call.answer("So'rov topilmadi.", show_alert=True)
+        return
+    if req["status"] != "pending":
+        await call.answer("Bu so'rov allaqachon ko'rib chiqilgan.", show_alert=True)
+        return
+
+    if action == "approve":
+        await db.grant_paid_slot(req["user_id"])
+        await db.set_payment_request_status(req_id, "approved")
+        try:
+            await bot.send_message(
+                req["user_id"],
+                "✅ <b>To'lovingiz tasdiqlandi!</b>\n\n"
+                "Endi 1 ta qo'shimcha e'lon joylashtirish huquqingiz bor.\n"
+                "Botga qayting va e'lon joylashtiring.",
+                reply_markup=back_to_menu_kb(),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        await call.message.edit_text(
+            call.message.text + "\n\n✅ <b>Tasdiqlandi. Foydalanuvchiga 1 slot berildi.</b>",
+            parse_mode="HTML"
+        )
+
+    elif action == "reject":
+        await db.set_payment_request_status(req_id, "rejected")
+        try:
+            await bot.send_message(
+                req["user_id"],
+                "❌ <b>To'lov so'rovingiz rad etildi.</b>\n"
+                "Muammo bo'lsa admin bilan bog'laning.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        await call.message.edit_text(
+            call.message.text + "\n\n❌ <b>Rad etildi.</b>",
+            parse_mode="HTML"
+        )
 
 
 # ── Brand ──────────────────────────────────────────────────────────────────────
@@ -94,12 +203,17 @@ async def sell_model(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("sell:year:"))
 async def sell_year(call: CallbackQuery, state: FSMContext):
     year_str = call.data.split(":", 2)[2]
-    await state.update_data(year=2015 if year_str == "Eskiroq..." else int(year_str))
+    if year_str == "Eskiroq...":
+        await state.update_data(year=MIN_YEAR)
+        display = f"{MIN_YEAR} yilgacha"
+    else:
+        await state.update_data(year=int(year_str))
+        display = year_str
     await state.set_state(SellStates.mileage)
     await call.message.edit_text(
-        f"✅ Yil: <b>{year_str}</b>\n\n"
-        "🛣 <b>Yurgan masofasini kiriting (km):</b>\n"
-        "<i>Masalan: 85000</i>",
+        f"✅ Yil: <b>{display}</b>\n\n"
+        f"🛣 <b>Yurgan masofasini kiriting (km):</b>\n"
+        f"<i>Masalan: 85000   (0 – {MAX_MILEAGE:,} oralig'ida)</i>",
         parse_mode="HTML"
     )
 
@@ -108,16 +222,27 @@ async def sell_year(call: CallbackQuery, state: FSMContext):
 
 @router.message(SellStates.mileage)
 async def sell_mileage(message: Message, state: FSMContext):
-    text = message.text.strip().replace(" ", "").replace(",", "")
-    if not text.isdigit():
-        await message.answer("❌ Iltimos, faqat raqam kiriting. Masalan: <b>85000</b>", parse_mode="HTML")
+    raw = message.text.strip().replace(" ", "").replace(",", "")
+    if not raw.isdigit():
+        await message.answer(
+            "❌ Faqat raqam kiriting.\n<i>Masalan: 85000</i>",
+            parse_mode="HTML"
+        )
         return
-    await state.update_data(mileage=int(text))
+    val = int(raw)
+    if val > MAX_MILEAGE:
+        await message.answer(
+            f"❌ Juda katta qiymat. Maksimal: <b>{MAX_MILEAGE:,} km</b>\n"
+            f"Agar masofa noto'g'ri bo'lsa tekshiring.",
+            parse_mode="HTML"
+        )
+        return
+    await state.update_data(mileage=val)
     await state.set_state(SellStates.price)
     await message.answer(
-        f"✅ Masofa: <b>{int(text):,} km</b>\n\n"
-        "💰 <b>Narxini kiriting (USD):</b>\n"
-        "<i>Masalan: 12500</i>",
+        f"✅ Masofa: <b>{val:,} km</b>\n\n"
+        f"💰 <b>Narxini kiriting (USD):</b>\n"
+        f"<i>Masalan: 12500   (${MIN_PRICE:,} – ${MAX_PRICE:,} oralig'ida)</i>",
         parse_mode="HTML"
     )
 
@@ -126,14 +251,32 @@ async def sell_mileage(message: Message, state: FSMContext):
 
 @router.message(SellStates.price)
 async def sell_price(message: Message, state: FSMContext):
-    text = message.text.strip().replace(" ", "").replace(",", "").replace("$", "")
-    if not text.isdigit():
-        await message.answer("❌ Iltimos, faqat raqam kiriting. Masalan: <b>12500</b>", parse_mode="HTML")
+    raw = message.text.strip().replace(" ", "").replace(",", "").replace("$", "")
+    if not raw.isdigit():
+        await message.answer(
+            "❌ Faqat raqam kiriting.\n<i>Masalan: 12500</i>",
+            parse_mode="HTML"
+        )
         return
-    await state.update_data(price=int(text), currency="USD")
+    val = int(raw)
+    if val < MIN_PRICE:
+        await message.answer(
+            f"❌ Narx juda past. Minimal: <b>${MIN_PRICE:,}</b>\n"
+            f"To'g'ri narxni kiriting.",
+            parse_mode="HTML"
+        )
+        return
+    if val > MAX_PRICE:
+        await message.answer(
+            f"❌ Narx juda yuqori. Maksimal: <b>${MAX_PRICE:,}</b>\n"
+            f"Narxni USD da kiriting.",
+            parse_mode="HTML"
+        )
+        return
+    await state.update_data(price=val, currency="USD")
     await state.set_state(SellStates.city)
     await message.answer(
-        f"✅ Narx: <b>${int(text):,}</b>\n\n📍 <b>Shaharni tanlang:</b>",
+        f"✅ Narx: <b>${val:,}</b>\n\n📍 <b>Shaharni tanlang:</b>",
         reply_markup=cities_kb("sell"),
         parse_mode="HTML"
     )
@@ -149,7 +292,8 @@ async def sell_city(call: CallbackQuery, state: FSMContext):
     await call.message.answer(
         f"✅ Shahar: <b>{city}</b>\n\n"
         "📱 <b>Telefon raqamingizni yuboring</b>\n"
-        "Xaridorlar siz bilan bog'lanishi uchun kerak.",
+        "Xaridorlar siz bilan bog'lanishi uchun kerak.\n\n"
+        "<i>Tugmani bosing yoki raqamni yozing: +998901234567</i>",
         reply_markup=phone_kb(),
         parse_mode="HTML"
     )
@@ -170,12 +314,12 @@ async def sell_phone_contact(message: Message, state: FSMContext):
 @router.message(SellStates.phone, F.text)
 async def sell_phone_text(message: Message, state: FSMContext):
     phone = message.text.strip()
-    # accept manually typed number too
     digits = phone.replace("+", "").replace(" ", "").replace("-", "")
     if not digits.isdigit() or len(digits) < 9:
         await message.answer(
-            "❌ Noto'g'ri raqam. Tugmani bosing yoki raqamni kiriting.\n"
-            "Masalan: <b>+998901234567</b>",
+            "❌ Noto'g'ri raqam format.\n"
+            "Masalan: <b>+998901234567</b>\n\n"
+            "Yoki pastdagi tugmani bosing.",
             parse_mode="HTML"
         )
         return
@@ -189,18 +333,14 @@ async def sell_phone_text(message: Message, state: FSMContext):
 async def _ask_photos(message: Message, state: FSMContext):
     await state.set_state(SellStates.photos)
     await message.answer(
-        f"✅ Telefon qabul qilindi.\n\n"
+        "✅ Telefon qabul qilindi.\n\n"
         f"📸 <b>Avtomobil rasmlarini yuboring</b>\n"
-        f"Kamida {MIN_PHOTOS} ta, ko'pi bilan {MAX_PHOTOS} ta.\n\n"
-        f"Rasmlarni yuborib bo'lgach <b>Tayyor</b> tugmasini bosing.",
+        f"Kamida <b>{MIN_PHOTOS} ta</b>, ko'pi bilan <b>{MAX_PHOTOS} ta</b>.\n\n"
+        "Rasmlarni yuborib bo'lgach <b>Tayyor</b> tugmasini bosing.",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML"
     )
-    # send the "Tayyor" inline button in a separate message
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Tayyor", callback_data="sell:photos_done")
-    await message.answer("👇", reply_markup=kb.as_markup())
+    await message.answer("👇", reply_markup=photos_done_inline())
 
 
 # ── Photos ─────────────────────────────────────────────────────────────────────
@@ -210,20 +350,20 @@ async def sell_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     photos: list = data.get("photos", [])
     if len(photos) >= MAX_PHOTOS:
-        await message.answer(f"⚠️ Maksimal {MAX_PHOTOS} ta rasm yuborishingiz mumkin.")
+        await message.answer(f"⚠️ Maksimal {MAX_PHOTOS} ta rasm. Tayyor tugmasini bosing.")
         return
     photos.append(message.photo[-1].file_id)
     await state.update_data(photos=photos)
     remaining = MIN_PHOTOS - len(photos)
     if remaining > 0:
-        await message.answer(f"✅ {len(photos)} ta rasm. Yana kamida {remaining} ta yuboring.")
+        await message.answer(
+            f"✅ {len(photos)} ta rasm qabul qilindi. Yana kamida <b>{remaining} ta</b> yuboring.",
+            parse_mode="HTML"
+        )
     else:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        kb = InlineKeyboardBuilder()
-        kb.button(text="✅ Tayyor", callback_data="sell:photos_done")
         await message.answer(
             f"✅ {len(photos)} ta rasm. Yana yuborishingiz yoki <b>Tayyor</b> bosishingiz mumkin.",
-            reply_markup=kb.as_markup(),
+            reply_markup=photos_done_inline(),
             parse_mode="HTML"
         )
 
@@ -233,7 +373,10 @@ async def sell_photos_done(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     photos = data.get("photos", [])
     if len(photos) < MIN_PHOTOS:
-        await call.answer(f"Kamida {MIN_PHOTOS} ta rasm kerak! ({len(photos)} ta yuborildi)", show_alert=True)
+        await call.answer(
+            f"Kamida {MIN_PHOTOS} ta rasm kerak! Hozir {len(photos)} ta yuborildi.",
+            show_alert=True
+        )
         return
     await state.set_state(SellStates.description)
     await call.message.edit_text(
@@ -251,8 +394,8 @@ async def sell_photos_done(call: CallbackQuery, state: FSMContext):
 async def sell_description(message: Message, state: FSMContext):
     desc = None if message.text.strip() == "—" else message.text.strip()
     await state.update_data(description=desc)
-
     data = await state.get_data()
+
     listing_id = await db.create_listing(
         user_id=message.from_user.id,
         brand=data["brand"],
@@ -262,21 +405,24 @@ async def sell_description(message: Message, state: FSMContext):
         price=data["price"],
         currency=data["currency"],
         city=data["city"],
-        description=data.get("description"),
+        description=desc,
         photo_file_ids=data["photos"],
         phone=data.get("phone", ""),
+        is_paid=data.get("is_paid", False),
     )
     await state.update_data(draft_listing_id=listing_id)
     await state.set_state(SellStates.confirm)
 
     desc_line = f"📝 {desc}\n" if desc else ""
+    paid_badge = "💳 To'langan e'lon\n" if data.get("is_paid") else "🆓 Bepul e'lon\n"
     preview = (
         f"🚗 <b>{data['brand']} {data['model']}, {data['year']}</b>\n"
         f"📍 {data['city']}   🛣 {data['mileage']:,} km\n"
         f"💰 <b>${data['price']:,}</b>\n"
         f"📱 {data.get('phone', '')}\n"
         f"{desc_line}"
-        f"📸 {len(data['photos'])} ta rasm"
+        f"📸 {len(data['photos'])} ta rasm\n"
+        f"{paid_badge}"
     )
     await message.answer(
         "📋 <b>E'loningizni tekshiring:</b>\n\n" + preview,
@@ -305,16 +451,24 @@ async def sell_confirm(call: CallbackQuery, state: FSMContext, bot: Bot):
 
     if action == "publish":
         listing = await db.get_listing(listing_id)
+        is_paid = listing.get("is_paid", False)
+
+        # Consume the paid slot
+        if is_paid:
+            await db.use_paid_slot(call.from_user.id)
+
         desc_line = f"📝 {listing['description']}\n" if listing["description"] else ""
+        paid_badge = "💳 <b>TO'LANGAN E'LON</b>\n" if is_paid else "🆓 Bepul e'lon\n"
         text = (
-            f"🆕 <b>Yangi e'lon (tasdiqlash kerak)</b>\n\n"
+            f"🆕 <b>Yangi e'lon (tasdiqlash kerak)</b>\n"
+            f"{paid_badge}\n"
             f"🚗 {listing['brand']} {listing['model']}, {listing['year']}\n"
             f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
             f"💰 ${listing['price']:,}\n"
             f"📱 {listing['phone']}\n"
             f"{desc_line}"
-            f"👤 Sotuvchi: @{call.from_user.username or call.from_user.id}\n"
-            f"🆔 ID: <code>{listing_id}</code>"
+            f"👤 @{call.from_user.username or call.from_user.id}\n"
+            f"🆔 <code>{listing_id}</code>"
         )
         from aiogram.types import InputMediaPhoto
         await bot.send_media_group(
