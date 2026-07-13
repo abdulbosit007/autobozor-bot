@@ -51,6 +51,7 @@ async def create_tables():
         """)
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS phone TEXT")
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS is_paid BOOLEAN DEFAULT FALSE")
+        await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS was_approved BOOLEAN DEFAULT FALSE")
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS payment_requests (
@@ -103,13 +104,11 @@ async def get_user(user_id: int):
 
 
 async def count_active_listings(user_id: int) -> int:
-    """Count listings that permanently use a free slot.
-    Only admin rejection frees a slot — everything else keeps it used.
-    """
+    """Slot is used only when admin approves. Pending/rejected = no slot used."""
     async with _pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT COUNT(*) AS cnt FROM listings WHERE user_id=%s AND status != 'rejected'",
+                "SELECT COUNT(*) AS cnt FROM listings WHERE user_id=%s AND was_approved=TRUE",
                 (user_id,)
             )
             return (await cur.fetchone())["cnt"]
@@ -217,6 +216,16 @@ async def update_listing_fields(listing_id: str, data: dict):
         await conn.commit()
 
 
+async def approve_listing(listing_id: str):
+    """Sets status to active and marks the slot as permanently used."""
+    async with _pool.connection() as conn:
+        await conn.execute(
+            "UPDATE listings SET status='active', was_approved=TRUE WHERE listing_id=%s::uuid",
+            (listing_id,)
+        )
+        await conn.commit()
+
+
 async def set_listing_status(listing_id: str, status: str):
     async with _pool.connection() as conn:
         await conn.execute(
@@ -283,7 +292,7 @@ async def expire_old_listings() -> list:
         async with conn.cursor() as cur:
             await cur.execute("""
                 UPDATE listings SET status='expired'
-                WHERE status='active' AND expires_at < NOW()
+                WHERE status='active' AND was_approved=TRUE AND expires_at < NOW()
                 RETURNING user_id, listing_id::text, brand, model
             """)
             rows = await cur.fetchall()

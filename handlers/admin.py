@@ -79,7 +79,7 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
         await call.answer("E'lon topilmadi.", show_alert=True)
         return
 
-    await db.set_listing_status(listing_id, "active")
+    await db.approve_listing(listing_id)
 
     # Post to channel
     desc_line = f"📝 {listing['description']}\n" if listing["description"] else ""
