@@ -85,8 +85,24 @@ async def mark_sold(call: CallbackQuery, bot: Bot):
         await call.answer("Ruxsat yo'q.", show_alert=True)
         return
     await db.set_listing_status(listing_id, "sold")
-    if listing:
-        await delete_channel_listing(bot, listing)
+    if listing and listing.get("channel_msg_id"):
+        try:
+            old_caption = (
+                f"🚗 <b>{listing['brand']} {listing['model']}, {listing['year']}</b>\n"
+                f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
+                f"💰 <b>${listing['price']:,}</b>\n"
+                f"📱 <b>{listing.get('phone', '')}</b>\n"
+                f"{'📝 ' + listing['description'] + chr(10) if listing.get('description') else ''}"
+                f"\n✅ <b>SOTILDI</b>"
+            )
+            await bot.edit_message_caption(
+                chat_id=CHANNEL_ID,
+                message_id=listing["channel_msg_id"],
+                caption=old_caption,
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
     await call.answer("✅ E'lon 'Sotildi' deb belgilandi.", show_alert=True)
     await call.message.edit_text(
         "✅ E'lon sotildi deb belgilandi va qidiruv natijalaridan olib tashlandi.",
