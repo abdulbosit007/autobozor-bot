@@ -50,7 +50,6 @@ async def main():
         BotCommand(command="buy",       description="🟢 Avtomobil sotib olish"),
         BotCommand(command="mylistings",description="📋 Mening e'lonlarim"),
         BotCommand(command="status",    description="📊 E'lon limitim holati"),
-        BotCommand(command="clear",     description="🧹 Suhbatni tozalash"),
     ])
 
     scheduler = AsyncIOScheduler()
