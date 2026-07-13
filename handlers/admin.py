@@ -79,6 +79,14 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
         await call.answer("E'lon topilmadi.", show_alert=True)
         return
 
+    if listing["status"] != "pending":
+        await call.message.edit_reply_markup(reply_markup=None)
+        await call.answer(
+            f"⚠️ Bu e'lon allaqachon bekor qilingan (sotuvchi tomonidan). Tasdiqlash mumkin emas.",
+            show_alert=True
+        )
+        return
+
     await db.approve_listing(listing_id)
 
     # Post to channel

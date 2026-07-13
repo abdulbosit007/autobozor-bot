@@ -87,6 +87,16 @@ async def cmd_mylistings(message: Message):
     await my_listings(message)
 
 
+@router.message(Command("clear"))
+async def cmd_clear(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "🧹 <b>Tozalandi.</b>\n\nNima qilmoqchisiz?",
+        reply_markup=main_menu(),
+        parse_mode="HTML"
+    )
+
+
 @router.message(Command("status"))
 async def cmd_status(message: Message):
     user_id = message.from_user.id
