@@ -104,11 +104,14 @@ async def get_user(user_id: int):
 
 
 async def count_active_listings(user_id: int) -> int:
-    """Slot is used only when admin approves. Pending/rejected = no slot used."""
+    """Counts submitted (pending) + all ever-approved listings.
+    Cancelled drafts (deleted, was_approved=FALSE) and rejected = free.
+    """
     async with _pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT COUNT(*) AS cnt FROM listings WHERE user_id=%s AND was_approved=TRUE",
+                """SELECT COUNT(*) AS cnt FROM listings
+                   WHERE user_id=%s AND (status='pending' OR was_approved=TRUE)""",
                 (user_id,)
             )
             return (await cur.fetchone())["cnt"]
