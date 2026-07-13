@@ -14,7 +14,6 @@ BRANDS_MODELS = {
 
 BRANDS = list(BRANDS_MODELS.keys())
 
-YEARS = [str(y) for y in range(2024, 2015, -1)] + ["Eskiroq..."]
 
 CITIES = ["Toshkent", "Samarqand", "Buxoro", "Andijon", "Farg'ona", "Namangan",
           "Qashqadaryo", "Surxondaryo", "Navoiy", "Xorazm", "Jizzax", "Sirdaryo",

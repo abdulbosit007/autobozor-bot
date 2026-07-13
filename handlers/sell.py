@@ -26,6 +26,7 @@ class SellStates(StatesGroup):
     brand       = State()
     model       = State()
     year        = State()
+    year_manual = State()
     mileage     = State()
     price       = State()
     city        = State()
@@ -204,18 +205,50 @@ async def sell_model(call: CallbackQuery, state: FSMContext):
 async def sell_year(call: CallbackQuery, state: FSMContext):
     year_str = call.data.split(":", 2)[2]
     if year_str == "Eskiroq...":
-        await state.update_data(year=MIN_YEAR)
-        display = f"{MIN_YEAR} yilgacha"
-    else:
-        await state.update_data(year=int(year_str))
-        display = year_str
+        await state.set_state(SellStates.year_manual)
+        await call.message.edit_text(
+            f"📅 <b>Ishlab chiqarilgan yilini kiriting:</b>\n"
+            f"<i>{MIN_YEAR} – {CURRENT_YEAR - 9} oralig'ida</i>\n\n"
+            f"Masalan: <b>2008</b>",
+            parse_mode="HTML"
+        )
+        return
+    await state.update_data(year=int(year_str))
+    await _ask_mileage(call.message, state, year_str)
+
+
+@router.message(SellStates.year_manual)
+async def sell_year_manual(message: Message, state: FSMContext):
+    raw = message.text.strip()
+    if not raw.isdigit():
+        await message.answer(
+            "❌ Faqat raqam kiriting.\n<i>Masalan: 2008</i>",
+            parse_mode="HTML"
+        )
+        return
+    year = int(raw)
+    if year < MIN_YEAR or year > CURRENT_YEAR:
+        await message.answer(
+            f"❌ Yil <b>{MIN_YEAR}</b> dan <b>{CURRENT_YEAR}</b> gacha bo'lishi kerak.\n"
+            f"Masalan: <b>2008</b>",
+            parse_mode="HTML"
+        )
+        return
+    await state.update_data(year=year)
+    await _ask_mileage(message, state, str(year))
+
+
+async def _ask_mileage(target, state: FSMContext, year_display: str):
     await state.set_state(SellStates.mileage)
-    await call.message.edit_text(
-        f"✅ Yil: <b>{display}</b>\n\n"
+    text = (
+        f"✅ Yil: <b>{year_display}</b>\n\n"
         f"🛣 <b>Yurgan masofasini kiriting (km):</b>\n"
-        f"<i>Masalan: 85000   (0 – {MAX_MILEAGE:,} oralig'ida)</i>",
-        parse_mode="HTML"
+        f"<i>Masalan: 85000   (0 – {MAX_MILEAGE:,} oralig'ida)</i>"
     )
+    if isinstance(target, Message):
+        await target.answer(text, parse_mode="HTML")
+    else:
+        await target.edit_text(text, parse_mode="HTML")
 
 
 # ── Mileage ────────────────────────────────────────────────────────────────────

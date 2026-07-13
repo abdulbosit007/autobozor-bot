@@ -1,6 +1,10 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from data.cars import BRANDS, BRANDS_MODELS, YEARS, CITIES
+import datetime
+from data.cars import BRANDS, BRANDS_MODELS, CITIES
+
+CURRENT_YEAR = datetime.datetime.now().year
+YEARS = [str(y) for y in range(CURRENT_YEAR, CURRENT_YEAR - 9, -1)] + ["Eskiroq..."]
 
 
 def main_menu() -> InlineKeyboardMarkup:
