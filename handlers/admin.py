@@ -139,7 +139,7 @@ async def reject_listing(call: CallbackQuery, bot: Bot):
         await call.answer("E'lon topilmadi.", show_alert=True)
         return
 
-    await db.set_listing_status(listing_id, "deleted")
+    await db.set_listing_status(listing_id, "rejected")  # frees the slot
 
     # Delete from channel if already posted
     if listing.get("channel_msg_id"):
