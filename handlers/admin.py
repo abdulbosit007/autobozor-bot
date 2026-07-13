@@ -141,6 +141,13 @@ async def reject_listing(call: CallbackQuery, bot: Bot):
 
     await db.set_listing_status(listing_id, "deleted")
 
+    # Delete from channel if already posted
+    if listing.get("channel_msg_id"):
+        try:
+            await bot.delete_message(CHANNEL_ID, listing["channel_msg_id"])
+        except Exception:
+            pass
+
     try:
         await bot.send_message(
             listing["user_id"],

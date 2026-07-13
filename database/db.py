@@ -195,6 +195,22 @@ async def get_user_listings(user_id: int):
             return await cur.fetchall()
 
 
+async def update_listing_fields(listing_id: str, data: dict):
+    """Sync FSM state data into the draft listing before publishing."""
+    async with _pool.connection() as conn:
+        await conn.execute("""
+            UPDATE listings SET
+                mileage=%s, price=%s, city=%s, description=%s,
+                phone=%s, photo_file_ids=%s
+            WHERE listing_id=%s::uuid
+        """, (
+            data.get("mileage"), data.get("price"), data.get("city"),
+            data.get("description"), data.get("phone", ""),
+            data.get("photos", []), listing_id
+        ))
+        await conn.commit()
+
+
 async def set_listing_status(listing_id: str, status: str):
     async with _pool.connection() as conn:
         await conn.execute(
