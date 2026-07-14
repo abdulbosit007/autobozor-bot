@@ -112,10 +112,21 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
         f"{desc_line}"
     )
 
+    tg_user_id = listing.get("tg_user_id")
+    contact_kb = None
+    if tg_user_id:
+        from aiogram.utils.keyboard import InlineKeyboardBuilder as IKB
+        btn = IKB()
+        btn.button(text="💬 Telegram orqali bog'lanish", url=f"tg://user?id={tg_user_id}")
+        contact_kb = btn.as_markup()
+
     photos = listing["photo_file_ids"]
     try:
         if len(photos) == 1:
-            msg = await bot.send_photo(CHANNEL_ID, photos[0], caption=caption, parse_mode="HTML")
+            msg = await bot.send_photo(
+                CHANNEL_ID, photos[0], caption=caption,
+                reply_markup=contact_kb, parse_mode="HTML"
+            )
             await db.set_channel_msg(listing_id, msg.message_id, [msg.message_id])
         else:
             media = [InputMediaPhoto(media=pid) for pid in photos]
@@ -123,6 +134,14 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
             msgs = await bot.send_media_group(CHANNEL_ID, media)
             all_ids = [m.message_id for m in msgs]
             await db.set_channel_msg(listing_id, all_ids[0], all_ids)
+            # send contact button as separate message after media group
+            if contact_kb:
+                btn_msg = await bot.send_message(
+                    CHANNEL_ID, "📲 Sotuvchi bilan bog'lanish:",
+                    reply_markup=contact_kb
+                )
+                all_ids.append(btn_msg.message_id)
+                await db.set_channel_msg(listing_id, all_ids[0], all_ids)
     except Exception as e:
         await call.message.answer(f"⚠️ Kanalga joylashda xato: {e}")
 

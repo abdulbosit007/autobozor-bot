@@ -36,6 +36,7 @@ class SellStates(StatesGroup):
     photos       = State()
     description  = State()
     confirm      = State()
+    share_tg = State()
     edit_choice  = State()   # rewrite or change params
     edit_param   = State()   # which param to change
     edit_mileage = State()
@@ -390,14 +391,38 @@ async def _process_phone(message: Message, state: FSMContext, editing: bool):
 async def sell_phone_contact(message: Message, state: FSMContext):
     if not await _process_phone(message, state, editing=False):
         return
-    await _ask_photos(message, state)
+    await _ask_share_tg(message, state)
 
 
 @router.message(SellStates.phone, F.text)
 async def sell_phone_text(message: Message, state: FSMContext):
     if not await _process_phone(message, state, editing=False):
         return
-    await _ask_photos(message, state)
+    await _ask_share_tg(message, state)
+
+
+async def _ask_share_tg(message: Message, state: FSMContext):
+    await state.set_state(SellStates.share_tg)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Ha, ulashaman", callback_data="sell:tg:yes")
+    kb.button(text="❌ Yo'q",          callback_data="sell:tg:no")
+    kb.adjust(2)
+    await message.answer(
+        "📲 <b>Telegram orqali ham bog'lanish imkonini bermoqchimisiz?</b>\n\n"
+        "Ha desangiz, xaridorlar sizga to'g'ridan-to'g'ri Telegram orqali yozishlari mumkin bo'ladi.",
+        reply_markup=ReplyKeyboardRemove(), parse_mode="HTML"
+    )
+    await message.answer("👇", reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data.startswith("sell:tg:"))
+async def sell_share_tg(call: CallbackQuery, state: FSMContext):
+    if call.data == "sell:tg:yes":
+        await state.update_data(tg_user_id=call.from_user.id)
+    else:
+        await state.update_data(tg_user_id=None)
+    await call.message.edit_reply_markup(reply_markup=None)
+    await _ask_photos(call.message, state)
 
 
 @router.message(SellStates.edit_phone, F.contact)
@@ -419,11 +444,10 @@ async def edit_phone_text(message: Message, state: FSMContext):
 async def _ask_photos(message: Message, state: FSMContext):
     await state.set_state(SellStates.photos)
     await message.answer(
-        "✅ Kontakt qabul qilindi.\n\n"
         f"📸 <b>Avtomobil rasmlarini yuboring</b>\n"
         f"Kamida <b>{MIN_PHOTOS} ta</b>, ko'pi bilan <b>{MAX_PHOTOS} ta</b>.\n\n"
         "Rasmlarni yuborib bo'lgach <b>Tayyor</b> tugmasini bosing.",
-        reply_markup=ReplyKeyboardRemove(), parse_mode="HTML"
+        parse_mode="HTML"
     )
     await message.answer("👇", reply_markup=photos_done_inline())
 
@@ -488,6 +512,7 @@ async def sell_description(message: Message, state: FSMContext):
         mileage=data["mileage"], price=data["price"], currency=data["currency"],
         city=data["city"], description=desc,
         photo_file_ids=data["photos"], phone=data.get("phone", ""),
+        tg_user_id=data.get("tg_user_id"),
         is_paid=data.get("is_paid", False),
     )
     await state.update_data(draft_listing_id=listing_id)
@@ -508,13 +533,16 @@ async def _show_confirm(target, state: FSMContext):
     await state.set_state(SellStates.confirm)
     data = await state.get_data()
     phone = data.get("phone", "")
+    tg_user_id = data.get("tg_user_id")
+    tg_line = f"💬 Telegram: ulashilgan\n" if tg_user_id else ""
     desc_line = f"📝 {data.get('description')}\n" if data.get("description") else ""
     paid_badge = "💳 To'langan e'lon\n" if data.get("is_paid") else "🆓 Bepul e'lon\n"
     preview = (
         f"🚗 <b>{data['brand']} {data['model']}, {data['year']}</b>\n"
         f"📍 {data['city']}   🛣 {data['mileage']:,} km\n"
         f"💰 <b>${data['price']:,}</b>\n"
-        f"📱 {phone_display(phone)}\n"
+        f"📱 {phone}\n"
+        f"{tg_line}"
         f"{desc_line}"
         f"📸 {len(data.get('photos', []))} ta rasm\n"
         f"{paid_badge}"
