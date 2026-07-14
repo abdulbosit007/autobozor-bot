@@ -1,5 +1,5 @@
 from aiogram import Router, F, Bot
-from aiogram.types import CallbackQuery, Message, InputMediaPhoto
+from aiogram.types import CallbackQuery, Message
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 
@@ -123,26 +123,11 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
 
     photos = listing["photo_file_ids"]
     try:
-        if len(photos) == 1:
-            msg = await bot.send_photo(
-                CHANNEL_ID, photos[0], caption=caption,
-                reply_markup=contact_kb, parse_mode="HTML"
-            )
-            await db.set_channel_msg(listing_id, msg.message_id, [msg.message_id])
-        else:
-            media = [InputMediaPhoto(media=pid) for pid in photos]
-            media[0] = InputMediaPhoto(media=photos[0], caption=caption, parse_mode="HTML")
-            msgs = await bot.send_media_group(CHANNEL_ID, media)
-            all_ids = [m.message_id for m in msgs]
-            await db.set_channel_msg(listing_id, all_ids[0], all_ids)
-            # send contact button as separate message after media group
-            if contact_kb:
-                btn_msg = await bot.send_message(
-                    CHANNEL_ID, "📲",
-                    reply_markup=contact_kb
-                )
-                all_ids.append(btn_msg.message_id)
-                await db.set_channel_msg(listing_id, all_ids[0], all_ids)
+        msg = await bot.send_photo(
+            CHANNEL_ID, photos[0], caption=caption,
+            reply_markup=contact_kb, parse_mode="HTML"
+        )
+        await db.set_channel_msg(listing_id, msg.message_id, [msg.message_id])
     except Exception as e:
         await call.message.answer(f"⚠️ Kanalga joylashda xato: {e}")
 
