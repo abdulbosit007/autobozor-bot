@@ -87,19 +87,19 @@ async def mark_sold(call: CallbackQuery, bot: Bot):
     await db.set_listing_status(listing_id, "sold")
     if listing and listing.get("channel_msg_id"):
         try:
-            old_caption = (
+            sold_caption = (
                 f"🚗 <b>{listing['brand']} {listing['model']}, {listing['year']}</b>\n"
                 f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
                 f"💰 <b>${listing['price']:,}</b>\n"
-                f"📱 <b>{listing.get('phone', '')}</b>\n"
                 f"{'📝 ' + listing['description'] + chr(10) if listing.get('description') else ''}"
                 f"\n✅ <b>SOTILDI</b>"
             )
             await bot.edit_message_caption(
                 chat_id=CHANNEL_ID,
                 message_id=listing["channel_msg_id"],
-                caption=old_caption,
-                parse_mode="HTML"
+                caption=sold_caption,
+                parse_mode="HTML",
+                reply_markup=None
             )
         except Exception:
             pass
