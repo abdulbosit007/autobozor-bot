@@ -106,7 +106,8 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
     phone = listing.get("phone") or ""
     caption = (
         f"🚗 <b>{listing['brand']} {listing['model']}, {listing['year']}</b>\n"
-        f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
+        f"📍 {listing['city']}\n"
+        f"🛣 {listing['mileage']:,} km\n"
         f"💰 <b>${listing['price']:,}</b>\n"
         f"📱 <b>{phone}</b>\n"
         f"{desc_line}"
@@ -137,7 +138,7 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
             # send contact button as separate message after media group
             if contact_kb:
                 btn_msg = await bot.send_message(
-                    CHANNEL_ID, "📲 Sotuvchi bilan bog'lanish:",
+                    CHANNEL_ID, "📲",
                     reply_markup=contact_kb
                 )
                 all_ids.append(btn_msg.message_id)

@@ -89,7 +89,8 @@ async def mark_sold(call: CallbackQuery, bot: Bot):
         try:
             sold_caption = (
                 f"🚗 <b>{listing['brand']} {listing['model']}, {listing['year']}</b>\n"
-                f"📍 {listing['city']}   🛣 {listing['mileage']:,} km\n"
+                f"📍 {listing['city']}\n"
+                f"🛣 {listing['mileage']:,} km\n"
                 f"💰 <b>${listing['price']:,}</b>\n"
                 f"{'📝 ' + listing['description'] + chr(10) if listing.get('description') else ''}"
                 f"\n✅ <b>SOTILDI</b>"

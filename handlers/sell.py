@@ -355,9 +355,9 @@ async def sell_city(call: CallbackQuery, state: FSMContext):
     await state.set_state(SellStates.phone)
     await call.message.answer(
         f"✅ Shahar: <b>{city}</b>\n\n"
-        "📱 <b>Telefon raqam yoki Telegram username kiriting:</b>\n\n"
-        "• Uzbek raqam: <b>901234567</b> yoki <b>+998901234567</b>\n"
-        "• Telegram: <b>@username</b>\n\n"
+        "📱 <b>Telefon raqamingizni kiriting:</b>\n\n"
+        "• <b>901234567</b>\n"
+        "• <b>+998901234567</b>\n\n"
         "Yoki pastdagi tugmani bosing:",
         reply_markup=phone_kb(), parse_mode="HTML"
     )
@@ -376,8 +376,7 @@ async def _process_phone(message: Message, state: FSMContext, editing: bool):
             "❌ Noto'g'ri format.\n\n"
             "Quyidagilardan birini kiriting:\n"
             "• <b>901234567</b> — 9 raqam (prefiks: 90,91,93,94,95,97,98,99,33,71,78,77,88,55,50)\n"
-            "• <b>+998901234567</b>\n"
-            "• <b>@username</b> — Telegram username\n\n"
+            "• <b>+998901234567</b>\n\n"
             "Yoki pastdagi tugmani bosing.",
             parse_mode="HTML"
         )
