@@ -417,9 +417,12 @@ async def _ask_share_tg(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("sell:tg:"))
 async def sell_share_tg(call: CallbackQuery, state: FSMContext):
     if call.data == "sell:tg:yes":
-        await state.update_data(tg_user_id=call.from_user.id)
+        uid = call.from_user.id
+        uname = call.from_user.username
+        link = f"https://t.me/{uname}" if uname else f"tg://user?id={uid}"
+        await state.update_data(tg_user_id=uid, tg_contact=link)
     else:
-        await state.update_data(tg_user_id=None)
+        await state.update_data(tg_user_id=None, tg_contact=None)
     await call.message.edit_reply_markup(reply_markup=None)
     await _ask_photos(call.message, state)
 
@@ -512,6 +515,7 @@ async def sell_description(message: Message, state: FSMContext):
         city=data["city"], description=desc,
         photo_file_ids=data["photos"], phone=data.get("phone", ""),
         tg_user_id=data.get("tg_user_id"),
+        tg_contact=data.get("tg_contact"),
         is_paid=data.get("is_paid", False),
     )
     await state.update_data(draft_listing_id=listing_id)

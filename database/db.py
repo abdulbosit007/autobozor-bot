@@ -54,6 +54,7 @@ async def create_tables():
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS was_approved BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS channel_msg_ids BIGINT[] DEFAULT '{}'::BIGINT[]")
         await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS tg_user_id BIGINT")
+        await conn.execute("ALTER TABLE listings ADD COLUMN IF NOT EXISTS tg_contact TEXT")
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS payment_requests (
@@ -168,17 +169,17 @@ async def set_payment_request_status(req_id: int, status: str):
 # ── Listings ───────────────────────────────────────────────────────────────────
 
 async def create_listing(user_id, brand, model, year, mileage, price, currency,
-                         city, description, photo_file_ids, phone="", tg_user_id=None, is_paid=False) -> str:
+                         city, description, photo_file_ids, phone="", tg_user_id=None, tg_contact=None, is_paid=False) -> str:
     async with _pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
                 INSERT INTO listings
                     (user_id, brand, model, year, mileage, price, currency, city,
-                     description, photo_file_ids, phone, tg_user_id, is_paid, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
+                     description, photo_file_ids, phone, tg_user_id, tg_contact, is_paid, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
                 RETURNING listing_id::text
             """, (user_id, brand, model, year, mileage, price, currency,
-                  city, description, photo_file_ids, phone, tg_user_id, is_paid))
+                  city, description, photo_file_ids, phone, tg_user_id, tg_contact, is_paid))
             row = await cur.fetchone()
             await conn.commit()
             return row["listing_id"]
@@ -211,12 +212,12 @@ async def update_listing_fields(listing_id: str, data: dict):
         await conn.execute("""
             UPDATE listings SET
                 mileage=%s, price=%s, city=%s, description=%s,
-                phone=%s, tg_user_id=%s, photo_file_ids=%s
+                phone=%s, tg_user_id=%s, tg_contact=%s, photo_file_ids=%s
             WHERE listing_id=%s::uuid
         """, (
             data.get("mileage"), data.get("price"), data.get("city"),
             data.get("description"), data.get("phone", ""),
-            data.get("tg_user_id"), data.get("photos", []), listing_id
+            data.get("tg_user_id"), data.get("tg_contact"), data.get("photos", []), listing_id
         ))
         await conn.commit()
 

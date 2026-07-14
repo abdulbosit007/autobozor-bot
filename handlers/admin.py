@@ -104,42 +104,29 @@ async def approve_listing(call: CallbackQuery, bot: Bot):
     # Post to channel
     desc_line = f"📝 {listing['description']}\n" if listing["description"] else ""
     phone = listing.get("phone") or ""
+    tg_contact = listing.get("tg_contact")
+    tg_line = f'💬 <a href="{tg_contact}">Telegram orqali bog\'lanish</a>\n' if tg_contact else ""
     caption = (
         f"🚗 <b>{listing['brand']} {listing['model']}, {listing['year']}</b>\n"
         f"📍 {listing['city']}\n"
         f"🛣 {listing['mileage']:,} km\n"
         f"💰 <b>${listing['price']:,}</b>\n"
         f"📱 <b>{phone}</b>\n"
+        f"{tg_line}"
         f"{desc_line}"
     )
 
-    tg_user_id = listing.get("tg_user_id")
-    contact_kb = None
-    if tg_user_id:
-        from aiogram.utils.keyboard import InlineKeyboardBuilder as IKB
-        btn = IKB()
-        btn.button(text="💬 Telegram orqali bog'lanish", url=f"tg://user?id={tg_user_id}")
-        contact_kb = btn.as_markup()
-
     photos = listing["photo_file_ids"]
     try:
-        all_ids = []
         if len(photos) == 1:
-            msg = await bot.send_photo(
-                CHANNEL_ID, photos[0], caption=caption,
-                reply_markup=contact_kb, parse_mode="HTML"
-            )
-            all_ids = [msg.message_id]
+            msg = await bot.send_photo(CHANNEL_ID, photos[0], caption=caption, parse_mode="HTML")
+            await db.set_channel_msg(listing_id, msg.message_id, [msg.message_id])
         else:
             media = [InputMediaPhoto(media=pid) for pid in photos]
+            media[0] = InputMediaPhoto(media=photos[0], caption=caption, parse_mode="HTML")
             msgs = await bot.send_media_group(CHANNEL_ID, media)
             all_ids = [m.message_id for m in msgs]
-            text_msg = await bot.send_message(
-                CHANNEL_ID, caption,
-                reply_markup=contact_kb, parse_mode="HTML"
-            )
-            all_ids.append(text_msg.message_id)
-        await db.set_channel_msg(listing_id, all_ids[0], all_ids)
+            await db.set_channel_msg(listing_id, all_ids[0], all_ids)
     except Exception as e:
         await call.message.answer(f"⚠️ Kanalga joylashda xato: {e}")
 
